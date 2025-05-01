@@ -24,9 +24,12 @@ class LintResult(BaseModel):
     status: str = Field(description="린트 상태 (success/failed)")
     errors: List[str] = Field(default_factory=list, description="에러 메시지 목록")
     warnings: List[str] = Field(default_factory=list, description="경고 메시지 목록")
+    exec_dir: Optional[str] = Field(None, description="린트 작업 관련 파일이 저장된 디렉토리 경로")
 
 class SimulationResult(BaseModel):
     """시뮬레이션 결과를 파싱하기 위한 Pydantic 모델"""
     status: str = Field(description="시뮬레이션 상태 (success/failed)")
-    log: str = Field(description="시뮬레이션 로그")
-    summary: str = Field(description="시뮬레이션 결과 요약") 
+    log: str = Field(description="시뮬레이션 로그 (stdout)")
+    summary: str = Field(description="시뮬레이션 결과 요약")
+    exec_dir: Optional[str] = Field(None, description="시뮬레이션 관련 파일이 저장된 디렉토리 경로")
+    errors: List[str] = Field(default_factory=list, description="시뮬레이션 에러 메시지 목록 (stderr)") 
