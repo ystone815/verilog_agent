@@ -1,10 +1,6 @@
 import streamlit as st
 from langchain_openai import ChatOpenAI
 from agents.design_agent import DesignAgent, SYSTEM_PROMPT
-from tools.spec_tools import LoadSpecificationTool, GenerateSpecificationTool, SaveSpecificationTool
-from tools.verilog_tools import GenerateVerilogTool, LintVerilogTool
-from tools.testbench_tools import GenerateTestbenchTool, RunSimulationTool
-from tools.repo_tools import SaveArtifactTool, CommitChangesTool
 from utils.status_manager import StatusManager
 import os
 import io
@@ -22,26 +18,14 @@ def get_status_manager():
 
 status_manager = get_status_manager()
 
-# --- 도구 및 LLM/에이전트 초기화 ---
-tools = [
-    LoadSpecificationTool(),
-    GenerateSpecificationTool(),
-    SaveSpecificationTool(),
-    GenerateVerilogTool(),
-    LintVerilogTool(status_manager=status_manager),
-    GenerateTestbenchTool(),
-    RunSimulationTool(status_manager=status_manager),
-    SaveArtifactTool(), # TODO: 필요 시 StatusManager 사용하도록 수정
-    CommitChangesTool()
-]
-
+# --- LLM 및 에이전트 초기화 ---
 llm = ChatOpenAI(
     base_url=os.getenv("OPENAI_API_BASE_URL", "http://localhost:8000/v1"),
     api_key=os.getenv("OPENAI_API_KEY", "EMPTY"),
     model=os.getenv("MODEL_NAME", "qwen-3-30b-a3b"),
     temperature=0.7
 )
-agent = DesignAgent(llm, tools, SYSTEM_PROMPT)
+agent = DesignAgent(llm=llm, status_manager=status_manager, system_prompt=SYSTEM_PROMPT)
 
 # --- 사이드바 설정 ---
 st.sidebar.title("Design Mate")
