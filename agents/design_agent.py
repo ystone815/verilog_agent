@@ -1,12 +1,12 @@
 from typing import List, Dict, Any, Sequence, Tuple, Optional, Union
 from langchain.agents import AgentExecutor, create_react_agent, AgentOutputParser
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.prompts import ChatPromptTemplate, PromptTemplate
 from langchain.tools import BaseTool, Tool
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
 from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.language_models import BaseLanguageModel
-from pydantic import create_model
+from pydantic import BaseModel, create_model
 
 # 도구 함수 임포트
 from tools.repo_tools import save_artifact, commit_changes
@@ -65,8 +65,13 @@ class DesignAgent:
                         kwargs['work_dir'] = work_dir
                         # 원래 도구의 _run 메서드를 호출해야 함
                         # BaseTool의 run 메서드를 사용하여 인자 자동 매핑 활용
-                        return tool_to_wrap.run(tool_input=kwargs, verbose=False, start_color=None, color=None)
-                        # return tool_to_wrap._run(*args, **kwargs) # 직접 _run 호출 시 인자 순서 문제 발생 가능
+                        try:
+                            return tool_to_wrap.run(tool_input=kwargs, verbose=False, start_color=None, color=None)
+                        except Exception as e:
+                            # 도구 실행 에러 로깅 강화
+                            print(f"Error running wrapped tool {tool_to_wrap.name}: {e}")
+                            # 에러 발생 시 Agent가 이해할 수 있는 문자열 반환
+                            return f"Error in {tool_to_wrap.name}: {str(e)}"
 
                     # 래핑된 함수를 기반으로 새로운 Tool 객체 생성
                     wrapped_tool = Tool(
@@ -86,18 +91,52 @@ class DesignAgent:
 
         self.tools = wrapped_tools # 래핑된 도구 리스트 사용
 
-        # 프롬프트 템플릿 설정
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ])
+        # 도구 설명을 문자열로 렌더링
+        tool_descriptions = render_text_description(self.tools)
+        # 도구 이름 목록 생성
+        tool_names_list = ", ".join([t.name for t in self.tools])
+
+        # 표준 ReAct 프롬프트 구조 정의
+        react_prompt_template_str = f"""
+{system_prompt}
+
+You have access to the following tools:
+
+{{tools}}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{{tool_names}}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Begin!
+
+Chat History:
+{{chat_history}}
+
+Question: {{input}}
+Thought:{{agent_scratchpad}}"""
+
+        # PromptTemplate 객체 생성
+        react_base_template = PromptTemplate.from_template(react_prompt_template_str)
+
+        # 실행 시마다 바뀌지 않는 변수들 (tools, tool_names)을 미리 채워넣음
+        self.prompt = react_base_template.partial(
+            tools=tool_descriptions,
+            tool_names=tool_names_list
+        )
+        # 이제 self.prompt는 input, chat_history, agent_scratchpad 변수만 필요로 함
 
         # 메모리 설정
         self.memory = ConversationBufferWindowMemory(
             memory_key="chat_history",
-            return_messages=True,
+            return_messages=False, # ReAct 프롬프트는 문자열 history를 기대하므로 False로 변경
             k=10
         )
 
@@ -146,9 +185,12 @@ class DesignAgent:
                 "traceback": tb_str
             }
 
-    def get_memory(self) -> List[BaseMessage]: # 반환 타입 수정
-        """현재 메모리 내용을 BaseMessage 리스트로 반환합니다."""
-        return self.memory.chat_memory.messages
+    def get_memory(self) -> str: # ReAct 프롬프트 위해 반환 타입 str로 변경
+        """현재 메모리 내용을 문자열로 반환합니다."""
+        # ConversationBufferWindowMemory는 기본적으로 문자열 history 제공
+        # 하지만 명시적으로 확인 또는 변환 로직 추가 가능
+        memory_variables = self.memory.load_memory_variables({})
+        return memory_variables.get("chat_history", "")
 
 # 시스템 프롬프트 (work_dir 관련 지침 수정)
 SYSTEM_PROMPT = """당신은 Verilog 설계 및 검증을 도와주는 AI 어시스턴트입니다.
